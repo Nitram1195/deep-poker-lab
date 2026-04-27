@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.bots.always_call import AlwaysCallBot
+from backend.bots.base import Bot
 from backend.bots.equity import EquityBot
+from backend.bots.llm import LLMBot
 from backend.bots.random_bot import RandomBot
 from backend.bots.tight_aggro import TightAggroRuleBot
 from backend.events import Snapshot
@@ -20,12 +23,28 @@ log = logging.getLogger("backend")
 
 
 def _build_runner(broadcast) -> GameRunner:
-    bots = [
+    bots: list[Bot] = [
         RandomBot(seed=42),
         AlwaysCallBot(),
         TightAggroRuleBot(),
         EquityBot(n_simulations=120, seed=7),
     ]
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key:
+        groq_model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+        bots.append(
+            LLMBot(
+                base_url="https://api.groq.com/openai/v1",
+                api_key=groq_key,
+                model=groq_model,
+                name=f"groq:{groq_model.split('/')[-1]}",
+            )
+        )
+        log.info("LLM bot enabled (groq, model=%s)", groq_model)
+    else:
+        log.info("GROQ_API_KEY not set — LLM bot disabled")
+
     return GameRunner(bots=bots, broadcast=broadcast, starting_stack=200, blinds=(1, 2))
 
 
