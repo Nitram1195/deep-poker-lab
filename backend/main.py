@@ -1,0 +1,80 @@
+"""FastAPI app entrypoint. Spawns the GameRunner on startup, exposes /ws."""
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.bots.always_call import AlwaysCallBot
+from backend.bots.random_bot import RandomBot
+from backend.bots.tight_aggro import TightAggroRuleBot
+from backend.events import Snapshot
+from backend.runner import GameRunner
+from backend.ws import ConnectionManager
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("backend")
+
+
+def _build_runner(broadcast) -> GameRunner:
+    bots = [
+        RandomBot(seed=42),
+        AlwaysCallBot(),
+        TightAggroRuleBot(),
+    ]
+    return GameRunner(bots=bots, broadcast=broadcast, starting_stack=200, blinds=(1, 2))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    cm = ConnectionManager()
+    runner = _build_runner(cm.broadcast)
+    app.state.cm = cm
+    app.state.runner = runner
+    runner.start()
+    log.info("game runner started")
+    try:
+        yield
+    finally:
+        log.info("shutting down")
+        await runner.stop()
+
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],            # dev only
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
+
+
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket) -> None:
+    cm: ConnectionManager = ws.app.state.cm
+    runner: GameRunner = ws.app.state.runner
+    await cm.connect(ws)
+    try:
+        # initial snapshot so a freshly-connected viewer can render something immediately
+        snapshot = Snapshot(
+            bots=[b.name for b in runner._bots],
+            leaderboard=runner.leaderboard(),
+            in_hand=runner.in_hand,
+            current_hand_id=runner._hand_id or None,
+        )
+        await cm.send(ws, snapshot)
+        while True:
+            # we don't expect inbound messages yet, but keep the connection alive
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await cm.disconnect(ws)

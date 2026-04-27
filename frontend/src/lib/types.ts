@@ -1,0 +1,114 @@
+// Mirrors backend/events.py — keep in sync if backend schemas change.
+
+export type ActionKind = 'fold' | 'check_call' | 'raise_to';
+
+export interface Action {
+	kind: ActionKind;
+	amount: number;
+}
+
+export interface SeatInfo {
+	seat: number;
+	bot_name: string;
+	starting_stack: number;
+	hole_cards: string[];
+}
+
+export interface HandStart {
+	type: 'hand_start';
+	hand_id: number;
+	button_seat: number;
+	blinds: [number, number];
+	seats: SeatInfo[];
+}
+
+export interface ActorTurn {
+	type: 'actor_turn';
+	seat: number;
+	to_call: number;
+	min_raise: number;
+	max_raise: number;
+}
+
+export interface ActionEvent {
+	type: 'action';
+	seat: number;
+	bot_name: string;
+	action: Action;
+	pot: number;
+	stacks: number[];
+	bets: number[];
+}
+
+export interface StreetDeal {
+	type: 'street_deal';
+	street: 'flop' | 'turn' | 'river';
+	board: string[];
+}
+
+export interface Showdown {
+	type: 'showdown';
+	hole_cards: Record<number, string[]>;
+}
+
+export interface HandEnd {
+	type: 'hand_end';
+	hand_id: number;
+	payoffs: Record<number, number>;
+	final_stacks: number[];
+	board: string[];
+}
+
+export interface LeaderboardEntry {
+	bot_name: string;
+	hands_played: number;
+	net_chips: number;
+}
+
+export interface LeaderboardUpdate {
+	type: 'leaderboard';
+	entries: LeaderboardEntry[];
+}
+
+export interface Snapshot {
+	type: 'snapshot';
+	bots: string[];
+	leaderboard: LeaderboardEntry[];
+	in_hand: boolean;
+	current_hand_id: number | null;
+}
+
+export type ServerEvent =
+	| HandStart
+	| ActorTurn
+	| ActionEvent
+	| StreetDeal
+	| Showdown
+	| HandEnd
+	| LeaderboardUpdate
+	| Snapshot;
+
+// --- UI state derived from event stream ---
+
+export interface SeatState {
+	seat: number;
+	bot_name: string;
+	stack: number;
+	bet: number;
+	folded: boolean;
+	hole_cards: string[] | null; // null = hidden (other player); [] = mucked
+	last_action: Action | null;
+}
+
+export interface TableState {
+	connected: boolean;
+	hand_id: number | null;
+	button_seat: number | null;
+	blinds: [number, number] | null;
+	seats: SeatState[];
+	board: string[];
+	pot: number;
+	current_actor: number | null;
+	leaderboard: LeaderboardEntry[];
+	last_event: string;
+}
