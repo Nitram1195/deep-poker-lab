@@ -14,6 +14,11 @@ export interface SeatInfo {
 	hole_cards: string[];
 }
 
+export interface HandLabel {
+	text: string;       // 'Pair of 8s', 'Aces full of Ks'
+	category: string;   // raw pokerkit category, used for color tier
+}
+
 export interface HandStart {
 	type: 'hand_start';
 	hand_id: number;
@@ -44,6 +49,7 @@ export interface StreetDeal {
 	type: 'street_deal';
 	street: 'flop' | 'turn' | 'river';
 	board: string[];
+	hand_labels: Record<number, HandLabel>;
 }
 
 export interface Showdown {
@@ -57,6 +63,7 @@ export interface HandEnd {
 	payoffs: Record<number, number>;
 	final_stacks: number[];
 	board: string[];
+	hand_labels: Record<number, HandLabel>;
 }
 
 export interface LeaderboardEntry {
@@ -98,6 +105,7 @@ export interface SeatState {
 	folded: boolean;
 	hole_cards: string[] | null; // null = hidden (other player); [] = mucked
 	last_action: Action | null;
+	hand_label: HandLabel | null; // null preflop or folded
 }
 
 export interface TableState {

@@ -12,6 +12,15 @@
 			`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}:8000/ws`;
 		store.connect(wsUrl);
 	});
+
+	const statusLine = $derived.by(() => {
+		const s = store.state;
+		if (!s.connected) return 'connecting…';
+		if (s.hand_id === null) return 'waiting for next hand…';
+		const actor = s.current_actor !== null ? s.seats[s.current_actor] : null;
+		if (actor) return `Hand #${s.hand_id} · ${actor.bot_name} to act`;
+		return `Hand #${s.hand_id}`;
+	});
 </script>
 
 <svelte:head>
@@ -22,7 +31,7 @@
 	<h1>Deep Poker Lab</h1>
 	<p class="status">
 		<span class="dot" class:on={store.state.connected}></span>
-		{store.state.connected ? `live · last: ${store.state.last_event || '—'}` : 'connecting…'}
+		{statusLine}
 	</p>
 </header>
 

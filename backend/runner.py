@@ -27,9 +27,10 @@ Broadcast = Callable[[Any], Awaitable[None]]
 
 
 # Pause durations so a human can follow the action in the browser.
-ACTION_DELAY_S = 0.8
-STREET_DELAY_S = 1.2
-HAND_END_DELAY_S = 2.5
+TURN_DELAY_S = 0.7        # actor's seat is highlighted for this long before they act
+ACTION_DELAY_S = 1.2      # how long the action stays on screen after it's taken
+STREET_DELAY_S = 1.5      # pause after new community cards are dealt
+HAND_END_DELAY_S = 3.0    # pause between hands
 
 
 class GameRunner:
@@ -136,7 +137,11 @@ class GameRunner:
             if cur_street != last_street and cur_street > 0 and engine.board_cards():
                 street_name = ("flop", "turn", "river")[min(cur_street - 1, 2)]
                 await self._broadcast(
-                    StreetDeal(street=street_name, board=engine.board_cards())
+                    StreetDeal(
+                        street=street_name,
+                        board=engine.board_cards(),
+                        hand_labels=engine.hand_labels_by_seat(),
+                    )
                 )
                 await asyncio.sleep(STREET_DELAY_S)
             last_street = cur_street
@@ -150,6 +155,10 @@ class GameRunner:
                     max_raise=legal.max_raise,
                 )
             )
+            # Give the viewer time to register *whose* turn it is before
+            # the action lands. (For sync bots this is a pure UX delay; for
+            # the equity bot most of its 280ms compute slots in here.)
+            await asyncio.sleep(TURN_DELAY_S)
 
             obs = build_observation(engine, actor, button_seat, self._blinds)
             try:
@@ -192,6 +201,7 @@ class GameRunner:
                 payoffs={i: payoffs[i] for i in range(n)},
                 final_stacks=engine.stacks(),
                 board=engine.board_cards(),
+                hand_labels=engine.hand_labels_by_seat(),
             )
         )
         await self._broadcast(LeaderboardUpdate(entries=self.leaderboard()))

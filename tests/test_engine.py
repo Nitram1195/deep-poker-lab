@@ -82,6 +82,7 @@ def test_runner_payoffs_match_leaderboard():
     )
     # neutralize the visual delays for the test
     import backend.runner as r
+    r.TURN_DELAY_S = 0.0
     r.ACTION_DELAY_S = 0.0
     r.STREET_DELAY_S = 0.0
     r.HAND_END_DELAY_S = 0.0

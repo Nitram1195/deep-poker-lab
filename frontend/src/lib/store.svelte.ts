@@ -2,6 +2,7 @@
 import type {
 	ActionEvent,
 	HandEnd,
+	HandLabel,
 	HandStart,
 	LeaderboardUpdate,
 	SeatState,
@@ -74,7 +75,8 @@ class Store {
 			bet: 0,
 			folded: false,
 			hole_cards: s.hole_cards,
-			last_action: null
+			last_action: null,
+			hand_label: null
 		}));
 	}
 
@@ -92,15 +94,26 @@ class Store {
 			this.state.seats[i].stack = ev.stacks[i];
 			this.state.seats[i].bet = ev.bets[i];
 		}
-		this.state.current_actor = null;
+		// Don't clear current_actor here — the next actor_turn (or hand_start)
+		// will move the spotlight. Keeping it set means the seat that just
+		// acted stays highlighted while showing its action label.
 	}
 
 	private applyStreetDeal(ev: StreetDeal) {
 		this.state.board = ev.board;
+		this.applyHandLabels(ev.hand_labels);
 		// new street resets per-street bets and last actions in the UI
 		for (const s of this.state.seats) {
 			s.bet = 0;
 			s.last_action = null;
+		}
+	}
+
+	private applyHandLabels(labels: Record<number, HandLabel>) {
+		// JSON keys are strings, so coerce.
+		for (const s of this.state.seats) {
+			const label = labels[s.seat] ?? labels[String(s.seat) as unknown as number];
+			s.hand_label = label ?? (s.folded ? null : s.hand_label);
 		}
 	}
 
@@ -114,6 +127,7 @@ class Store {
 	private applyHandEnd(ev: HandEnd) {
 		this.state.board = ev.board;
 		this.state.current_actor = null;
+		this.applyHandLabels(ev.hand_labels);
 		// stacks at this point are post-pull (after winnings); show those
 		for (let i = 0; i < this.state.seats.length; i++) {
 			this.state.seats[i].stack = ev.final_stacks[i];

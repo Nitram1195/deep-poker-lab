@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.bots.always_call import AlwaysCallBot
+from backend.bots.equity import EquityBot
 from backend.bots.random_bot import RandomBot
 from backend.bots.tight_aggro import TightAggroRuleBot
 from backend.events import Snapshot
@@ -23,6 +24,7 @@ def _build_runner(broadcast) -> GameRunner:
         RandomBot(seed=42),
         AlwaysCallBot(),
         TightAggroRuleBot(),
+        EquityBot(n_simulations=120, seed=7),
     ]
     return GameRunner(bots=bots, broadcast=broadcast, starting_stack=200, blinds=(1, 2))
 

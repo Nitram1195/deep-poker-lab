@@ -22,6 +22,11 @@ class SeatInfo(BaseModel):
     hole_cards: list[str]
 
 
+class HandLabel(BaseModel):
+    text: str       # human-friendly: "Pair of 8s", "Aces full of Ks"
+    category: str   # raw pokerkit category: "One pair", "Full house" — used for color tier
+
+
 class ActorTurn(BaseModel):
     type: Literal["actor_turn"] = "actor_turn"
     seat: int
@@ -44,6 +49,7 @@ class StreetDeal(BaseModel):
     type: Literal["street_deal"] = "street_deal"
     street: Literal["flop", "turn", "river"]
     board: list[str]
+    hand_labels: dict[int, HandLabel]
 
 
 class Showdown(BaseModel):
@@ -57,6 +63,7 @@ class HandEnd(BaseModel):
     payoffs: dict[int, int]
     final_stacks: list[int]
     board: list[str]
+    hand_labels: dict[int, HandLabel]
 
 
 class LeaderboardEntry(BaseModel):

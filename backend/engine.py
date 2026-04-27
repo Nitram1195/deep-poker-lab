@@ -1,9 +1,85 @@
 """Thin wrapper over pokerkit. One instance = one hand."""
+from collections import Counter
 from dataclasses import dataclass
 
-from pokerkit import Automation, Mode, NoLimitTexasHoldem, State
+from pokerkit import Automation, Card, Mode, NoLimitTexasHoldem, StandardHighHand, State
 
-from backend.events import Action
+from backend.events import Action, HandLabel
+
+_DECK_BY_STR: dict[str, Card] = {
+    f"{c.rank}{c.suit}": c
+    for c in Card.parse("".join(r + s for r in "23456789TJQKA" for s in "shdc"))
+}
+
+_RANK_ORDER = {r: i for i, r in enumerate("23456789TJQKA")}
+
+
+def _rank_word(rank: str, plural: bool = False) -> str:
+    """'A' -> 'A' / 'As'; 'T' -> '10' / '10s'; '8' -> '8' / '8s'."""
+    base = "10" if rank == "T" else rank
+    return base + "s" if plural else base
+
+
+def _describe(hand) -> str:
+    """Human-friendly hand description: 'Pair of 8s', 'Aces full of Ks', etc."""
+    category = hand.entry.label.value
+    ranks = [c.rank for c in hand.cards]
+    counts = Counter(ranks)
+
+    def by_count(n: int) -> list[str]:
+        return sorted(
+            (r for r, c in counts.items() if c == n),
+            key=lambda r: _RANK_ORDER[r],
+            reverse=True,
+        )
+
+    def hi() -> str:
+        return _rank_word(max(ranks, key=lambda r: _RANK_ORDER[r]))
+
+    if category == "One pair":
+        return f"Pair of {_rank_word(by_count(2)[0], plural=True)}"
+    if category == "Two pair":
+        a, b = by_count(2)
+        return f"Two pair: {_rank_word(a, plural=True)} & {_rank_word(b, plural=True)}"
+    if category == "Three of a kind":
+        return f"Set of {_rank_word(by_count(3)[0], plural=True)}"
+    if category == "Straight":
+        # The wheel A-2-3-4-5 is a 5-high straight, not A-high.
+        rank_set = set(ranks)
+        if rank_set == set("A2345"):
+            return "5-high straight"
+        return f"{hi()}-high straight"
+    if category == "Flush":
+        return f"{hi()}-high flush"
+    if category == "Full house":
+        return f"{_rank_word(by_count(3)[0], plural=True)} full of {_rank_word(by_count(2)[0], plural=True)}"
+    if category == "Four of a kind":
+        return f"Quad {_rank_word(by_count(4)[0], plural=True)}"
+    if category == "Straight flush":
+        rank_set = set(ranks)
+        if rank_set == set("AKQJT"):
+            return "Royal flush"
+        if rank_set == set("A2345"):
+            return "5-high straight flush"
+        return f"{hi()}-high straight flush"
+    if category == "High card":
+        return f"{hi()}-high"
+    return category  # fallback
+
+
+def hand_label(hole: tuple[str, str], board: list[str]) -> HandLabel | None:
+    """Descriptive label + category for a (hole, board) combination."""
+    # pokerkit's evaluator requires hole + board >= 5.
+    if len(hole) + len(board) < 5:
+        return None
+    try:
+        h = StandardHighHand.from_game(
+            [_DECK_BY_STR[c] for c in hole],
+            [_DECK_BY_STR[c] for c in board],
+        )
+    except (ValueError, KeyError):
+        return None
+    return HandLabel(text=_describe(h), category=h.entry.label.value)
 
 _AUTOMATIONS = (
     Automation.ANTE_POSTING,
@@ -121,3 +197,16 @@ class HandEngine:
     def payoffs(self) -> list[int]:
         """Per-seat chip delta for this hand (sums to 0 minus rake)."""
         return list(self._state.payoffs)
+
+    def hand_labels_by_seat(self) -> dict[int, "HandLabel"]:
+        """Hand-strength labels per non-folded seat. Empty preflop."""
+        labels: dict[int, HandLabel] = {}
+        folded = self.folded()
+        board = self.board_cards()
+        for i in range(self.player_count):
+            if folded[i]:
+                continue
+            label = hand_label(self.hole_cards(i), board)
+            if label is not None:
+                labels[i] = label
+        return labels
