@@ -6,7 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from backend.bots.base import Bot
+from backend.bots.base import Bot, HistoryEntry
 from backend.engine import HandEngine
 from backend.events import (
     ActionEvent,
@@ -124,6 +124,8 @@ class GameRunner:
         )
 
         last_street = -1
+        actions_this_hand: list[HistoryEntry] = []
+        street_names = ("preflop", "flop", "turn", "river")
         while not engine.is_complete():
             actor = engine.current_actor()
             if actor is None:
@@ -160,7 +162,9 @@ class GameRunner:
             # the equity bot most of its 280ms compute slots in here.)
             await asyncio.sleep(TURN_DELAY_S)
 
-            obs = build_observation(engine, actor, button_seat, self._blinds)
+            obs = build_observation(
+                engine, actor, button_seat, self._blinds, action_history=actions_this_hand
+            )
             try:
                 action = bot_for_seat[actor].act(obs)
             except Exception:
@@ -168,7 +172,17 @@ class GameRunner:
                 from backend.events import Action
                 action = Action(kind="check_call") if legal.can_check_call else Action(kind="fold")
 
+            street_at_action = engine.street_index()
             engine.apply(action)
+            actions_this_hand.append(
+                HistoryEntry(
+                    street=street_names[min(street_at_action, 3)],
+                    seat=actor,
+                    bot_name=bot_for_seat[actor].name,
+                    kind=action.kind,
+                    amount=action.amount,
+                )
+            )
 
             await self._broadcast(
                 ActionEvent(

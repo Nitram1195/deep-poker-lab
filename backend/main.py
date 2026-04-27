@@ -32,7 +32,9 @@ def _build_runner(broadcast) -> GameRunner:
 
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
-        groq_model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+        # llama-3.3-70b-versatile is a non-reasoning model and more reliable for
+        # structured-JSON output than the reasoning gpt-oss models on Groq's free tier.
+        groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         bots.append(
             LLMBot(
                 base_url="https://api.groq.com/openai/v1",

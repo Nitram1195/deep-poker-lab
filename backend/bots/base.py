@@ -4,6 +4,14 @@ from pydantic import BaseModel
 from backend.events import Action
 
 
+class HistoryEntry(BaseModel):
+    street: str         # 'preflop' | 'flop' | 'turn' | 'river'
+    seat: int
+    bot_name: str
+    kind: str           # 'fold' | 'check_call' | 'raise_to'
+    amount: int = 0
+
+
 class Observation(BaseModel):
     """Public view + own hole cards. What a bot sees when asked to act."""
     hole_cards: tuple[str, str]
@@ -21,6 +29,7 @@ class Observation(BaseModel):
     blinds: tuple[int, int]
     can_check_call: bool
     can_raise: bool
+    action_history: list[HistoryEntry] = []  # actions taken so far this hand, in order
 
 
 class Bot(Protocol):

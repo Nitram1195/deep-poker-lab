@@ -1,9 +1,15 @@
 """Build a per-bot Observation from the current engine state."""
-from backend.bots.base import Observation
+from backend.bots.base import HistoryEntry, Observation
 from backend.engine import HandEngine
 
 
-def build_observation(engine: HandEngine, seat: int, button_seat: int, blinds: tuple[int, int]) -> Observation:
+def build_observation(
+    engine: HandEngine,
+    seat: int,
+    button_seat: int,
+    blinds: tuple[int, int],
+    action_history: list[HistoryEntry] | None = None,
+) -> Observation:
     legal = engine.legal_actions()
     return Observation(
         hole_cards=engine.hole_cards(seat),
@@ -21,4 +27,5 @@ def build_observation(engine: HandEngine, seat: int, button_seat: int, blinds: t
         blinds=blinds,
         can_check_call=legal.can_check_call,
         can_raise=legal.can_raise,
+        action_history=action_history or [],
     )

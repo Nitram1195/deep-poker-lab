@@ -18,9 +18,12 @@ log = logging.getLogger(__name__)
 
 
 _DEFAULT_PERSONALITY = (
-    "You are a strong but unpredictable No-Limit Texas Hold'em player. "
-    "Maximize chips over the long run. Bluff occasionally to keep opponents guessing, "
-    "but pick your spots — don't bluff into multiple opponents who haven't shown weakness."
+    "You are a sharp, exploitative No-Limit Texas Hold'em player. "
+    "Be aggressive — raise for value with strong hands, semi-bluff with draws, "
+    "and bluff occasionally on scary boards or when opponents have shown weakness. "
+    "Many opponents at this table call too much; value-bet them relentlessly. "
+    "When a tight opponent raises, fold marginal hands. "
+    "Vary your sizing and don't be predictable."
 )
 
 _STREET_NAMES = ("preflop", "flop", "turn", "river")
@@ -43,6 +46,24 @@ def _format_messages(obs: Observation, name: str, personality: str) -> list[dict
         seat_lines.append(
             f"  seat {i}: stack={obs.stacks[i]}, bet_this_street={obs.bets[i]}{marker}"
         )
+
+    # Action history grouped by street.
+    by_street: dict[str, list] = {}
+    for h in obs.action_history:
+        by_street.setdefault(h.street, []).append(h)
+    history_lines = []
+    for sn in _STREET_NAMES:
+        if sn in by_street:
+            parts = []
+            for h in by_street[sn]:
+                if h.kind == "raise_to":
+                    parts.append(f"seat {h.seat} ({h.bot_name}) raises to {h.amount}")
+                elif h.kind == "check_call":
+                    parts.append(f"seat {h.seat} ({h.bot_name}) checks/calls")
+                elif h.kind == "fold":
+                    parts.append(f"seat {h.seat} ({h.bot_name}) folds")
+            history_lines.append(f"  {sn}: " + ", ".join(parts))
+    history_text = "\n".join(history_lines) if history_lines else "  (no actions yet — you are first to act preflop)"
 
     system = (
         f'You are playing No-Limit Texas Hold\'em as a bot named "{name}" '
@@ -74,6 +95,8 @@ def _format_messages(obs: Observation, name: str, personality: str) -> list[dict
         f"  Blinds: SB={sb}, BB={bb}\n\n"
         "Seats (seat 0 = small blind, last seat = button):\n"
         + "\n".join(seat_lines)
+        + "\n\nAction history this hand:\n"
+        + history_text
         + "\n\nChoose your action."
     )
 
@@ -93,9 +116,9 @@ class LLMBot:
         model: str,
         name: str = "LLM",
         personality: str | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 150,
-        timeout: float = 10.0,
+        temperature: float = 0.9,
+        max_tokens: int = 1500,           # reasoning models need headroom for CoT before the JSON
+        timeout: float = 20.0,
     ):
         self.name = name
         self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
