@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.bots.always_call import AlwaysCallBot
+from backend.bots.always_fold import AlwaysFoldBot
 from backend.bots.base import Bot
 from backend.bots.equity import EquityBot
 from backend.bots.llm import LLMBot
@@ -26,6 +27,7 @@ def _build_runner(broadcast) -> GameRunner:
     bots: list[Bot] = [
         RandomBot(seed=42),
         AlwaysCallBot(),
+        AlwaysFoldBot(),
         TightAggroRuleBot(),
         EquityBot(n_simulations=120, seed=7),
     ]

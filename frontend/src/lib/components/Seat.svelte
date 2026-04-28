@@ -35,8 +35,8 @@
 		<div class="hand-label" data-rank={seat.hand_label.category}>{seat.hand_label.text}</div>
 	{/if}
 	<div class="info">
-		<span class="stack">stack: {seat.stack}</span>
-		{#if seat.bet > 0}<span class="bet">bet: {seat.bet}</span>{/if}
+		<span class="stack"><span class="info-label">stack</span> {seat.stack}</span>
+		{#if seat.bet > 0}<span class="bet"><span class="info-label">bet</span> {seat.bet}</span>{/if}
 	</div>
 	<div class="last-action">{actionLabel}</div>
 </div>
@@ -45,34 +45,54 @@
 	.seat {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
-		padding: 8px 12px;
-		background: rgba(255, 255, 255, 0.92);
-		border-radius: 8px;
-		min-width: 160px;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-		transition: outline 0.2s, box-shadow 0.2s, opacity 0.15s, transform 0.2s;
-		outline: 3px solid transparent;
+		gap: 6px;
+		padding: 10px 14px;
+		min-width: 168px;
+		background: linear-gradient(160deg, rgba(45, 27, 78, 0.92) 0%, rgba(20, 8, 42, 0.92) 100%);
+		border: 1px solid rgba(168, 85, 247, 0.3);
+		border-radius: 12px;
+		color: var(--ink-0);
+		backdrop-filter: blur(8px);
+		box-shadow:
+			0 8px 24px rgba(0, 0, 0, 0.4),
+			inset 0 1px 0 rgba(255, 255, 255, 0.04);
+		transition: outline 0.2s, box-shadow 0.2s, border-color 0.2s, opacity 0.15s, transform 0.2s;
+		outline: 2px solid transparent;
 	}
 	.seat.actor {
-		outline: 3px solid #f1c40f;
-		box-shadow: 0 0 0 4px rgba(241, 196, 15, 0.35), 0 0 24px rgba(241, 196, 15, 0.7);
-		transform: scale(1.04);
+		border-color: rgba(217, 70, 239, 0.9);
+		outline: 2px solid rgba(217, 70, 239, 0.7);
+		box-shadow:
+			0 0 0 4px rgba(217, 70, 239, 0.18),
+			0 0 32px rgba(217, 70, 239, 0.6),
+			0 8px 24px rgba(0, 0, 0, 0.4);
+		transform: scale(1.05);
 		animation: actor-pulse 1.4s ease-in-out infinite;
 		z-index: 2;
 	}
 	@keyframes actor-pulse {
-		0%, 100% { box-shadow: 0 0 0 4px rgba(241, 196, 15, 0.35), 0 0 24px rgba(241, 196, 15, 0.7); }
-		50%      { box-shadow: 0 0 0 6px rgba(241, 196, 15, 0.55), 0 0 36px rgba(241, 196, 15, 0.95); }
+		0%, 100% {
+			box-shadow:
+				0 0 0 4px rgba(217, 70, 239, 0.18),
+				0 0 32px rgba(217, 70, 239, 0.55),
+				0 8px 24px rgba(0, 0, 0, 0.4);
+		}
+		50% {
+			box-shadow:
+				0 0 0 6px rgba(217, 70, 239, 0.32),
+				0 0 48px rgba(217, 70, 239, 0.85),
+				0 8px 24px rgba(0, 0, 0, 0.4);
+		}
 	}
 	.turn-arrow {
-		color: #d68910;
+		color: var(--purple-3);
 		font-weight: 700;
-		font-size: 1em;
+		font-size: 0.95em;
 		line-height: 1;
+		text-shadow: 0 0 6px rgba(217, 70, 239, 0.7);
 	}
 	.seat.folded {
-		opacity: 0.45;
+		opacity: 0.4;
 	}
 	.name-row {
 		display: flex;
@@ -81,19 +101,23 @@
 	}
 	.name {
 		font-weight: 600;
+		font-size: 0.95em;
+		color: var(--ink-0);
+		letter-spacing: 0.01em;
 	}
 	.dealer-btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 1.4em;
-		height: 1.4em;
+		margin-left: auto;
+		width: 1.5em;
+		height: 1.5em;
 		border-radius: 50%;
-		background: white;
-		color: black;
-		border: 1px solid #444;
-		font-weight: 700;
-		font-size: 0.8em;
+		background: linear-gradient(145deg, #fef3c7, #f59e0b);
+		color: #422006;
+		font-weight: 800;
+		font-size: 0.72em;
+		box-shadow: 0 2px 6px rgba(245, 158, 11, 0.4);
 	}
 	.cards {
 		display: flex;
@@ -107,37 +131,53 @@
 	.info {
 		display: flex;
 		justify-content: space-between;
-		font-size: 0.9em;
-		color: #444;
+		font-size: 0.85em;
+		color: var(--ink-1);
+		font-variant-numeric: tabular-nums;
+	}
+	.info-label {
+		color: var(--ink-2);
+		font-size: 0.85em;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		margin-right: 2px;
 	}
 	.bet {
-		color: #2c7;
+		color: var(--win);
 		font-weight: 600;
 	}
 	.last-action {
 		min-height: 1.2em;
-		font-size: 0.85em;
-		color: #2c3e50;
+		font-size: 0.8em;
+		color: var(--ink-1);
 		font-style: italic;
+		letter-spacing: 0.02em;
 	}
 	.hand-label {
-		font-size: 0.82em;
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		padding: 1px 6px;
-		border-radius: 3px;
+		font-size: 0.78em;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		padding: 2px 8px;
+		border-radius: 4px;
 		align-self: flex-start;
-		background: #ecf0f1;
-		color: #2c3e50;
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--ink-1);
+		border: 1px solid rgba(255, 255, 255, 0.08);
 	}
-	/* color hand-strength tiers from weak (gray) to monster (red) */
-	.hand-label[data-rank='High card']         { background: #ecf0f1; color: #555; }
-	.hand-label[data-rank='One pair']          { background: #d6eaf8; color: #1b4f72; }
-	.hand-label[data-rank='Two pair']          { background: #aed6f1; color: #154360; }
-	.hand-label[data-rank='Three of a kind']   { background: #abebc6; color: #145a32; }
-	.hand-label[data-rank='Straight']          { background: #f9e79f; color: #7d6608; }
-	.hand-label[data-rank='Flush']             { background: #f5cba7; color: #784212; }
-	.hand-label[data-rank='Full house']        { background: #f5b7b1; color: #78281f; }
-	.hand-label[data-rank='Four of a kind']    { background: #e74c3c; color: white; }
-	.hand-label[data-rank='Straight flush']    { background: #c0392b; color: white; }
+	/* hand-strength tiers, dark-theme palette */
+	.hand-label[data-rank='High card']         { background: rgba(255, 255, 255, 0.05); color: #b9a8d6; border-color: rgba(255, 255, 255, 0.08); }
+	.hand-label[data-rank='One pair']          { background: rgba(59, 130, 246, 0.18); color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); }
+	.hand-label[data-rank='Two pair']          { background: rgba(14, 165, 233, 0.22); color: #67e8f9; border-color: rgba(14, 165, 233, 0.45); }
+	.hand-label[data-rank='Three of a kind']   { background: rgba(34, 197, 94, 0.22); color: #6ee7b7; border-color: rgba(34, 197, 94, 0.45); }
+	.hand-label[data-rank='Straight']          { background: rgba(234, 179, 8, 0.22); color: #fde047; border-color: rgba(234, 179, 8, 0.45); }
+	.hand-label[data-rank='Flush']             { background: rgba(249, 115, 22, 0.25); color: #fdba74; border-color: rgba(249, 115, 22, 0.5); }
+	.hand-label[data-rank='Full house']        { background: rgba(244, 63, 94, 0.28); color: #fda4af; border-color: rgba(244, 63, 94, 0.55); }
+	.hand-label[data-rank='Four of a kind']    {
+		background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; border-color: #fecaca;
+		box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+	}
+	.hand-label[data-rank='Straight flush']    {
+		background: linear-gradient(135deg, #d946ef, #6d28d9); color: white; border-color: #f5d0fe;
+		box-shadow: 0 0 16px rgba(217, 70, 239, 0.7);
+	}
 </style>

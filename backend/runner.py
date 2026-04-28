@@ -92,33 +92,46 @@ class GameRunner:
 
     async def _play_one_hand(self) -> None:
         n = len(self._bots)
-        # Rotate seating: button rotates one seat per hand. With pokerkit player_count=n,
-        # seat n-1 is the button, so by rotating bot_for_seat we rotate which bot has
-        # the button.
+        # Each bot has a fixed UI seat (its index in self._bots) so the table is
+        # stable across hands. The engine-side seat rotates: pokerkit's button is
+        # always engine seat n-1, so we reassign which bot sits at engine seat n-1
+        # each hand. Everything that goes out over the WS is in UI-seat space.
         rotation = self._hand_id % n
         bot_for_seat = [self._bots[(rotation + i) % n] for i in range(n)]
+        # engine seat e -> UI seat
+        e2u = [(rotation + e) % n for e in range(n)]
+
+        def list_e2u(values: list) -> list:
+            out = [None] * n
+            for e in range(n):
+                out[e2u[e]] = values[e]
+            return out
+
+        def dict_e2u(d: dict) -> dict:
+            return {e2u[e]: v for e, v in d.items()}
 
         engine = HandEngine(
             player_count=n,
             starting_stacks=[self._starting_stack] * n,
             blinds=self._blinds,
         )
-        button_seat = n - 1
+        button_engine_seat = n - 1
+        button_ui_seat = e2u[button_engine_seat]
         self._hand_id += 1
 
         await self._broadcast(
             HandStart(
                 hand_id=self._hand_id,
-                button_seat=button_seat,
+                button_seat=button_ui_seat,
                 blinds=self._blinds,
                 seats=[
                     SeatInfo(
-                        seat=i,
-                        bot_name=bot_for_seat[i].name,
+                        seat=u,
+                        bot_name=self._bots[u].name,
                         starting_stack=self._starting_stack,
-                        hole_cards=list(engine.hole_cards(i)),
+                        hole_cards=list(engine.hole_cards((u - rotation) % n)),
                     )
-                    for i in range(n)
+                    for u in range(n)
                 ],
             )
         )
@@ -142,7 +155,7 @@ class GameRunner:
                     StreetDeal(
                         street=street_name,
                         board=engine.board_cards(),
-                        hand_labels=engine.hand_labels_by_seat(),
+                        hand_labels=dict_e2u(engine.hand_labels_by_seat()),
                     )
                 )
                 await asyncio.sleep(STREET_DELAY_S)
@@ -151,7 +164,7 @@ class GameRunner:
             legal = engine.legal_actions()
             await self._broadcast(
                 ActorTurn(
-                    seat=actor,
+                    seat=e2u[actor],
                     to_call=legal.to_call,
                     min_raise=legal.min_raise,
                     max_raise=legal.max_raise,
@@ -163,7 +176,7 @@ class GameRunner:
             await asyncio.sleep(TURN_DELAY_S)
 
             obs = build_observation(
-                engine, actor, button_seat, self._blinds, action_history=actions_this_hand
+                engine, actor, button_engine_seat, self._blinds, action_history=actions_this_hand
             )
             try:
                 action = bot_for_seat[actor].act(obs)
@@ -186,12 +199,12 @@ class GameRunner:
 
             await self._broadcast(
                 ActionEvent(
-                    seat=actor,
+                    seat=e2u[actor],
                     bot_name=bot_for_seat[actor].name,
                     action=action,
                     pot=engine.pot() + sum(engine.bets()),
-                    stacks=engine.stacks(),
-                    bets=engine.bets(),
+                    stacks=list_e2u(engine.stacks()),
+                    bets=list_e2u(engine.bets()),
                 )
             )
             await asyncio.sleep(ACTION_DELAY_S)
@@ -199,7 +212,7 @@ class GameRunner:
         # Hand finished: reveal hole cards of any non-folded seats, broadcast end.
         folded = engine.folded()
         revealed = {
-            i: list(engine.hole_cards(i)) for i in range(n) if not folded[i]
+            e2u[i]: list(engine.hole_cards(i)) for i in range(n) if not folded[i]
         }
         if len(revealed) > 1:
             await self._broadcast(Showdown(hole_cards=revealed))
@@ -212,10 +225,10 @@ class GameRunner:
         await self._broadcast(
             HandEnd(
                 hand_id=self._hand_id,
-                payoffs={i: payoffs[i] for i in range(n)},
-                final_stacks=engine.stacks(),
+                payoffs={e2u[i]: payoffs[i] for i in range(n)},
+                final_stacks=list_e2u(engine.stacks()),
                 board=engine.board_cards(),
-                hand_labels=engine.hand_labels_by_seat(),
+                hand_labels=dict_e2u(engine.hand_labels_by_seat()),
             )
         )
         await self._broadcast(LeaderboardUpdate(entries=self.leaderboard()))
