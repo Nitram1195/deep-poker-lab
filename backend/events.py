@@ -20,6 +20,7 @@ class SeatInfo(BaseModel):
     bot_name: str
     starting_stack: int
     hole_cards: list[str]
+    sitting_out: bool = False
 
 
 class HandLabel(BaseModel):
@@ -77,6 +78,13 @@ class LeaderboardUpdate(BaseModel):
     entries: list[LeaderboardEntry]
 
 
+class SeatsUpdate(BaseModel):
+    """Pushed when a seat sits out / sits in. Takes effect from the next hand;
+    the UI can still mark the seat as sitting-out immediately."""
+    type: Literal["seats_update"] = "seats_update"
+    sitting_out: list[int]   # UI seat indices currently flagged to sit out
+
+
 class Snapshot(BaseModel):
     """Sent on websocket connect so a late viewer can render the current table."""
     type: Literal["snapshot"] = "snapshot"
@@ -84,6 +92,7 @@ class Snapshot(BaseModel):
     leaderboard: list[LeaderboardEntry]
     in_hand: bool
     current_hand_id: int | None = None
+    sitting_out: list[int] = []
 
 
 Event = Union[
@@ -94,5 +103,6 @@ Event = Union[
     Showdown,
     HandEnd,
     LeaderboardUpdate,
+    SeatsUpdate,
     Snapshot,
 ]

@@ -6,6 +6,7 @@ import type {
 	HandStart,
 	LeaderboardUpdate,
 	SeatState,
+	SeatsUpdate,
 	ServerEvent,
 	Showdown,
 	Snapshot,
@@ -30,12 +31,14 @@ function emptyState(): TableState {
 
 class Store {
 	state: TableState = $state(emptyState());
+	private ws: WebSocket | null = null;
+	private sittingOut: Set<number> = new Set();
 
 	private apply(ev: ServerEvent) {
 		this.state.last_event = ev.type;
 		switch (ev.type) {
 			case 'snapshot':
-				this.state.leaderboard = (ev as Snapshot).leaderboard;
+				this.applySnapshot(ev as Snapshot);
 				break;
 			case 'hand_start':
 				this.applyHandStart(ev as HandStart);
@@ -58,6 +61,18 @@ class Store {
 			case 'leaderboard':
 				this.state.leaderboard = (ev as LeaderboardUpdate).entries;
 				break;
+			case 'seats_update':
+				this.applySeatsUpdate(ev as SeatsUpdate);
+				break;
+		}
+	}
+
+	private applySnapshot(ev: Snapshot) {
+		this.state.leaderboard = ev.leaderboard;
+		this.sittingOut = new Set(ev.sitting_out ?? []);
+		// reflect on any seats already rendered
+		for (const s of this.state.seats) {
+			s.sitting_out = this.sittingOut.has(s.seat);
 		}
 	}
 
@@ -68,6 +83,7 @@ class Store {
 		this.state.board = [];
 		this.state.pot = 0;
 		this.state.current_actor = null;
+		this.sittingOut = new Set(ev.seats.filter((s) => s.sitting_out).map((s) => s.seat));
 		this.state.seats = ev.seats.map<SeatState>((s) => ({
 			seat: s.seat,
 			bot_name: s.bot_name,
@@ -76,7 +92,8 @@ class Store {
 			folded: false,
 			hole_cards: s.hole_cards,
 			last_action: null,
-			hand_label: null
+			hand_label: null,
+			sitting_out: !!s.sitting_out
 		}));
 	}
 
@@ -89,20 +106,15 @@ class Store {
 			seat.last_action = ev.action;
 			if (ev.action.kind === 'fold') seat.folded = true;
 		}
-		// keep all bets/stacks fresh
 		for (let i = 0; i < this.state.seats.length; i++) {
 			this.state.seats[i].stack = ev.stacks[i];
 			this.state.seats[i].bet = ev.bets[i];
 		}
-		// Don't clear current_actor here — the next actor_turn (or hand_start)
-		// will move the spotlight. Keeping it set means the seat that just
-		// acted stays highlighted while showing its action label.
 	}
 
 	private applyStreetDeal(ev: StreetDeal) {
 		this.state.board = ev.board;
 		this.applyHandLabels(ev.hand_labels);
-		// new street resets per-street bets and last actions in the UI
 		for (const s of this.state.seats) {
 			s.bet = 0;
 			s.last_action = null;
@@ -110,7 +122,6 @@ class Store {
 	}
 
 	private applyHandLabels(labels: Record<number, HandLabel>) {
-		// JSON keys are strings, so coerce.
 		for (const s of this.state.seats) {
 			const label = labels[s.seat] ?? labels[String(s.seat) as unknown as number];
 			s.hand_label = label ?? (s.folded ? null : s.hand_label);
@@ -128,20 +139,40 @@ class Store {
 		this.state.board = ev.board;
 		this.state.current_actor = null;
 		this.applyHandLabels(ev.hand_labels);
-		// stacks at this point are post-pull (after winnings); show those
 		for (let i = 0; i < this.state.seats.length; i++) {
 			this.state.seats[i].stack = ev.final_stacks[i];
 		}
 	}
 
+	private applySeatsUpdate(ev: SeatsUpdate) {
+		this.sittingOut = new Set(ev.sitting_out);
+		for (const s of this.state.seats) {
+			s.sitting_out = this.sittingOut.has(s.seat);
+		}
+	}
+
+	private send(payload: object) {
+		if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify(payload));
+		}
+	}
+
+	sitOut(seat: number) {
+		this.send({ cmd: 'sit_out', seat });
+	}
+
+	sitIn(seat: number) {
+		this.send({ cmd: 'sit_in', seat });
+	}
+
 	connect(url: string) {
 		const ws = new WebSocket(url);
+		this.ws = ws;
 		ws.onopen = () => {
 			this.state.connected = true;
 		};
 		ws.onclose = () => {
 			this.state.connected = false;
-			// retry after a short delay so the page survives a backend restart
 			setTimeout(() => this.connect(url), 1500);
 		};
 		ws.onerror = () => ws.close();

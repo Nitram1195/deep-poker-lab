@@ -12,6 +12,7 @@ export interface SeatInfo {
 	bot_name: string;
 	starting_stack: number;
 	hole_cards: string[];
+	sitting_out?: boolean;
 }
 
 export interface HandLabel {
@@ -77,12 +78,18 @@ export interface LeaderboardUpdate {
 	entries: LeaderboardEntry[];
 }
 
+export interface SeatsUpdate {
+	type: 'seats_update';
+	sitting_out: number[];
+}
+
 export interface Snapshot {
 	type: 'snapshot';
 	bots: string[];
 	leaderboard: LeaderboardEntry[];
 	in_hand: boolean;
 	current_hand_id: number | null;
+	sitting_out?: number[];
 }
 
 export type ServerEvent =
@@ -93,6 +100,7 @@ export type ServerEvent =
 	| Showdown
 	| HandEnd
 	| LeaderboardUpdate
+	| SeatsUpdate
 	| Snapshot;
 
 // --- UI state derived from event stream ---
@@ -106,6 +114,7 @@ export interface SeatState {
 	hole_cards: string[] | null; // null = hidden (other player); [] = mucked
 	last_action: Action | null;
 	hand_label: HandLabel | null; // null preflop or folded
+	sitting_out: boolean;
 }
 
 export interface TableState {

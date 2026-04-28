@@ -88,17 +88,22 @@ async def ws_endpoint(ws: WebSocket) -> None:
     runner: GameRunner = ws.app.state.runner
     await cm.connect(ws)
     try:
-        # initial snapshot so a freshly-connected viewer can render something immediately
         snapshot = Snapshot(
             bots=[b.name for b in runner._bots],
             leaderboard=runner.leaderboard(),
             in_hand=runner.in_hand,
             current_hand_id=runner._hand_id or None,
+            sitting_out=runner.sitting_out,
         )
         await cm.send(ws, snapshot)
         while True:
-            # we don't expect inbound messages yet, but keep the connection alive
-            await ws.receive_text()
+            data = await ws.receive_json()
+            cmd = data.get("cmd") if isinstance(data, dict) else None
+            seat = data.get("seat") if isinstance(data, dict) else None
+            if cmd in ("sit_out", "sit_in") and isinstance(seat, int):
+                await runner.set_sitting_out(seat, cmd == "sit_out")
+            else:
+                log.warning("ws: ignoring unknown command %r", data)
     except WebSocketDisconnect:
         pass
     finally:
