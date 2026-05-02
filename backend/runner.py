@@ -9,10 +9,13 @@ from typing import Any
 
 from backend.bots.base import Bot, HistoryEntry
 from backend.engine import HandEngine, hand_label
+from pydantic import BaseModel
+
 from backend.events import (
     ActionEvent,
     ActorTurn,
     HandEnd,
+    HandReplay,
     HandStart,
     HandSync,
     LeaderboardEntry,
@@ -69,6 +72,11 @@ class GameRunner:
         self._cur_human_seats: set[int] = set()
         self._cur_actor_ui: int | None = None
         self._cur_legal: tuple[int, int, int] | None = None
+        # Replay buffer for the current hand (unfiltered: all hole cards visible)
+        # and the most recently completed hand.
+        self._cur_replay: list[BaseModel] = []
+        self._last_replay: list[BaseModel] = []
+        self._last_replay_hand_id: int | None = None
 
     @property
     def in_hand(self) -> bool:
@@ -127,6 +135,22 @@ class GameRunner:
             min_raise=min_raise,
             max_raise=max_raise,
         )
+
+    def build_replay(self) -> HandReplay | None:
+        """Snapshot the most recently completed hand for replay, with every
+        active seat's hole cards visible. Returns None if no hand finished yet."""
+        if not self._last_replay or self._last_replay_hand_id is None:
+            return None
+        return HandReplay(
+            hand_id=self._last_replay_hand_id,
+            events=[ev.model_dump() for ev in self._last_replay],
+        )
+
+    async def _emit(self, ev_replay: BaseModel, ev_broadcast: BaseModel | None = None) -> None:
+        """Append the unfiltered event to the replay buffer and broadcast the
+        (possibly filtered) live version. If only one is given, both are equal."""
+        self._cur_replay.append(ev_replay)
+        await self._broadcast(ev_broadcast if ev_broadcast is not None else ev_replay)
 
     async def set_sitting_out(self, ui_seat: int, sit_out: bool) -> None:
         if not (0 <= ui_seat < len(self._bots)):
@@ -191,6 +215,10 @@ class GameRunner:
         human_ui_seats = {u for u in range(n_total) if getattr(self._bots[u], "is_human", False)}
         any_human = bool(human_ui_seats)
 
+        # Reset the replay buffer for this hand (we only finalize after hand_end,
+        # so an early-return up above leaves the previous hand's replay intact).
+        self._cur_replay = []
+
         engine = HandEngine(
             player_count=n_active,
             starting_stacks=[self._starting_stack] * n_active,
@@ -215,27 +243,29 @@ class GameRunner:
         def dict_to_ui(d: dict) -> dict:
             return {e2u[e]: v for e, v in d.items()}
 
+        # Two seat payloads: the live (filtered) one hides opponents' cards from
+        # any human at the table; the replay one shows every active hand.
         seats_payload: list[SeatInfo] = []
+        seats_payload_replay: list[SeatInfo] = []
         for u in range(n_total):
             sitting_out = u in self._sitting_out
             is_human = u in human_ui_seats
+            full_hole = [] if sitting_out else list(engine.hole_cards(u2e[u]))
             if sitting_out:
-                hole_cards = []
+                live_hole = []
             elif any_human and not is_human:
-                # Hide opponents' cards from the human; backs are rendered client-side.
-                hole_cards = []
+                live_hole = []
             else:
-                hole_cards = list(engine.hole_cards(u2e[u]))
-            seats_payload.append(
-                SeatInfo(
-                    seat=u,
-                    bot_name=self._bots[u].name,
-                    starting_stack=self._starting_stack,
-                    hole_cards=hole_cards,
-                    sitting_out=sitting_out,
-                    is_human=is_human,
-                )
+                live_hole = full_hole
+            base = dict(
+                seat=u,
+                bot_name=self._bots[u].name,
+                starting_stack=self._starting_stack,
+                sitting_out=sitting_out,
+                is_human=is_human,
             )
+            seats_payload.append(SeatInfo(hole_cards=live_hole, **base))
+            seats_payload_replay.append(SeatInfo(hole_cards=full_hole, **base))
 
         # Stash everything resync-relevant before broadcasting hand_start.
         self._cur_engine = engine
@@ -246,13 +276,19 @@ class GameRunner:
         self._cur_actor_ui = None
         self._cur_legal = None
 
-        await self._broadcast(
+        await self._emit(
+            HandStart(
+                hand_id=self._hand_id,
+                button_seat=button_ui_seat,
+                blinds=self._blinds,
+                seats=seats_payload_replay,
+            ),
             HandStart(
                 hand_id=self._hand_id,
                 button_seat=button_ui_seat,
                 blinds=self._blinds,
                 seats=seats_payload,
-            )
+            ),
         )
 
         last_street = -1
@@ -266,15 +302,23 @@ class GameRunner:
             cur_street = engine.street_index()
             if cur_street != last_street and cur_street > 0 and engine.board_cards():
                 street_name = ("flop", "turn", "river")[min(cur_street - 1, 2)]
-                labels_ui = dict_to_ui(engine.hand_labels_by_seat())
-                if any_human:
-                    labels_ui = {u: lbl for u, lbl in labels_ui.items() if u in human_ui_seats}
-                await self._broadcast(
+                labels_unfiltered = dict_to_ui(engine.hand_labels_by_seat())
+                labels_live = (
+                    {u: lbl for u, lbl in labels_unfiltered.items() if u in human_ui_seats}
+                    if any_human
+                    else labels_unfiltered
+                )
+                await self._emit(
                     StreetDeal(
                         street=street_name,
                         board=engine.board_cards(),
-                        hand_labels=labels_ui,
-                    )
+                        hand_labels=labels_unfiltered,
+                    ),
+                    StreetDeal(
+                        street=street_name,
+                        board=engine.board_cards(),
+                        hand_labels=labels_live,
+                    ),
                 )
                 await asyncio.sleep(STREET_DELAY_S)
             last_street = cur_street
@@ -282,7 +326,7 @@ class GameRunner:
             legal = engine.legal_actions()
             self._cur_actor_ui = e2u[actor]
             self._cur_legal = (legal.to_call, legal.min_raise, legal.max_raise)
-            await self._broadcast(
+            await self._emit(
                 ActorTurn(
                     seat=e2u[actor],
                     to_call=legal.to_call,
@@ -317,7 +361,7 @@ class GameRunner:
                 )
             )
 
-            await self._broadcast(
+            await self._emit(
                 ActionEvent(
                     seat=e2u[actor],
                     bot_name=bot_for_engine_seat[actor].name,
@@ -345,7 +389,7 @@ class GameRunner:
             revealed_ui = {
                 e2u[i]: hole_by_engine_seat[i] for i in showdown_engine_seats
             }
-            await self._broadcast(Showdown(hole_cards=revealed_ui))
+            await self._emit(Showdown(hole_cards=revealed_ui))
             await asyncio.sleep(STREET_DELAY_S)
 
         # Catch up on streets that pokerkit auto-dealt during an all-in runout
@@ -363,7 +407,7 @@ class GameRunner:
                     lbl = hand_label(tuple(hole_by_engine_seat[i]), partial_board)
                     if lbl is not None:
                         labels_engine[i] = lbl
-                await self._broadcast(
+                await self._emit(
                     StreetDeal(
                         street=street_name,
                         board=partial_board,
@@ -385,7 +429,7 @@ class GameRunner:
             if lbl is not None:
                 final_labels_ui[e2u[i]] = lbl
 
-        await self._broadcast(
+        await self._emit(
             HandEnd(
                 hand_id=self._hand_id,
                 payoffs={e2u[i]: payoffs[i] for i in range(n_active)},
@@ -395,6 +439,9 @@ class GameRunner:
             )
         )
         await self._broadcast(LeaderboardUpdate(entries=self.leaderboard()))
+        # Finalize the replay buffer for this hand.
+        self._last_replay = self._cur_replay
+        self._last_replay_hand_id = self._hand_id
         # Hand done — drop the resync state so a connect during the inter-hand
         # delay falls back to the next hand_start instead of replaying this one.
         self._cur_engine = None

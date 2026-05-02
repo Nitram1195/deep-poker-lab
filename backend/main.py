@@ -105,6 +105,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
             seat = data.get("seat") if isinstance(data, dict) else None
             if cmd in ("sit_out", "sit_in") and isinstance(seat, int):
                 await runner.set_sitting_out(seat, cmd == "sit_out")
+            elif cmd == "replay_last":
+                replay = runner.build_replay()
+                if replay is not None:
+                    await cm.send(ws, replay)
             elif cmd == "act" and isinstance(seat, int):
                 bot = runner._bots[seat] if 0 <= seat < len(runner._bots) else None
                 if bot is None or not getattr(bot, "is_human", False):

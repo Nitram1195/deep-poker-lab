@@ -115,6 +115,15 @@ class HandSync(BaseModel):
     max_raise: int = 0
 
 
+class HandReplay(BaseModel):
+    """Event payload for replaying the last hand. Hole cards are unfiltered:
+    every active seat shows its real hand. The client plays each event
+    through its normal reducers with the original pacing."""
+    type: Literal["hand_replay"] = "hand_replay"
+    hand_id: int
+    events: list[dict]
+
+
 Event = Union[
     HandStart,
     ActorTurn,
@@ -126,4 +135,5 @@ Event = Union[
     SeatsUpdate,
     Snapshot,
     HandSync,
+    HandReplay,
 ]

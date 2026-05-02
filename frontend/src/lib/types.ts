@@ -111,6 +111,12 @@ export interface HandSync {
 	max_raise: number;
 }
 
+export interface HandReplay {
+	type: 'hand_replay';
+	hand_id: number;
+	events: ServerEvent[];
+}
+
 export type ServerEvent =
 	| HandStart
 	| ActorTurn
@@ -121,7 +127,8 @@ export type ServerEvent =
 	| LeaderboardUpdate
 	| SeatsUpdate
 	| Snapshot
-	| HandSync;
+	| HandSync
+	| HandReplay;
 
 // --- UI state derived from event stream ---
 

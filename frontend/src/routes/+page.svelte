@@ -20,6 +20,14 @@
 		if (actor) return `Hand #${s.hand_id} · ${actor.bot_name} to act`;
 		return `Hand #${s.hand_id}`;
 	});
+
+	function onReplay() {
+		store.requestReplay();
+	}
+
+	function onStopReplay() {
+		store.stopReplay();
+	}
 </script>
 
 <svelte:head>
@@ -31,10 +39,33 @@
 <header>
 	<h1>Deep Poker <span class="accent">Lab</span></h1>
 	<p class="status">
-		<span class="dot" class:on={store.state.connected}></span>
+		<span class="dot" class:on={store.liveState.connected}></span>
 		<span class="status-text">{statusLine}</span>
 	</p>
+	<div class="toolbar">
+		{#if store.replayActive}
+			<button class="tool-btn stop" onclick={onStopReplay}>■ Stop replay</button>
+		{:else}
+			<button
+				class="tool-btn"
+				disabled={!store.hasReplayAvailable}
+				onclick={onReplay}
+				title={store.hasReplayAvailable ? 'Replay the last hand with all cards visible' : 'No completed hand yet'}
+			>
+				▶ Replay last hand
+			</button>
+		{/if}
+	</div>
 </header>
+
+{#if store.replayActive}
+	<div class="replay-banner">
+		<span class="replay-tag">REPLAY</span>
+		<span class="replay-info">
+			Hand #{store.replayHandId ?? '—'} · all cards revealed
+		</span>
+	</div>
+{/if}
 
 <main>
 	<PokerTable state={store.state} />
@@ -131,5 +162,74 @@
 		position: relative;
 		z-index: 1;
 		padding: 16px 24px 48px;
+	}
+	.toolbar {
+		margin-top: 12px;
+		display: flex;
+		justify-content: center;
+		gap: 8px;
+	}
+	.tool-btn {
+		padding: 7px 16px;
+		font: inherit;
+		font-size: 0.85em;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		color: var(--ink-0);
+		background: linear-gradient(160deg, rgba(109, 40, 217, 0.55), rgba(45, 27, 78, 0.55));
+		border: 1px solid rgba(168, 85, 247, 0.45);
+		border-radius: 999px;
+		cursor: pointer;
+		backdrop-filter: blur(6px);
+		transition: background 0.12s, transform 0.06s, border-color 0.12s;
+	}
+	.tool-btn:hover:not(:disabled) {
+		background: linear-gradient(160deg, rgba(168, 85, 247, 0.65), rgba(109, 40, 217, 0.65));
+		border-color: rgba(217, 70, 239, 0.55);
+	}
+	.tool-btn:active:not(:disabled) {
+		transform: scale(0.98);
+	}
+	.tool-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.tool-btn.stop {
+		background: linear-gradient(160deg, rgba(217, 70, 239, 0.65), rgba(127, 29, 29, 0.5));
+		border-color: rgba(248, 113, 113, 0.55);
+	}
+	.tool-btn.stop:hover {
+		background: linear-gradient(160deg, rgba(217, 70, 239, 0.85), rgba(220, 38, 38, 0.6));
+	}
+	.replay-banner {
+		position: relative;
+		z-index: 2;
+		max-width: 1000px;
+		margin: 8px auto 0;
+		padding: 8px 16px;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 12px;
+		font-size: 0.85em;
+		color: var(--ink-0);
+		background: linear-gradient(90deg, rgba(217, 70, 239, 0.18), rgba(109, 40, 217, 0.22), rgba(217, 70, 239, 0.18));
+		border: 1px solid rgba(217, 70, 239, 0.5);
+		border-radius: 10px;
+		box-shadow: 0 0 24px rgba(217, 70, 239, 0.25);
+	}
+	.replay-tag {
+		padding: 2px 10px;
+		font-weight: 800;
+		letter-spacing: 0.18em;
+		font-size: 0.78em;
+		background: linear-gradient(135deg, #d946ef, #6d28d9);
+		color: #fff;
+		border-radius: 999px;
+		box-shadow: 0 0 14px rgba(217, 70, 239, 0.5);
+	}
+	.replay-info {
+		font-variant-numeric: tabular-nums;
+		color: var(--ink-1);
 	}
 </style>
