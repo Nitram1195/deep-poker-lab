@@ -4,6 +4,7 @@ import type {
 	HandEnd,
 	HandLabel,
 	HandStart,
+	HandSync,
 	LeaderboardUpdate,
 	SeatState,
 	SeatsUpdate,
@@ -24,6 +25,7 @@ function emptyState(): TableState {
 		board: [],
 		pot: 0,
 		current_actor: null,
+		legal: null,
 		leaderboard: [],
 		last_event: ''
 	};
@@ -45,6 +47,11 @@ class Store {
 				break;
 			case 'actor_turn':
 				this.state.current_actor = ev.seat;
+				this.state.legal = {
+					to_call: ev.to_call,
+					min_raise: ev.min_raise,
+					max_raise: ev.max_raise
+				};
 				break;
 			case 'action':
 				this.applyAction(ev as ActionEvent);
@@ -64,7 +71,38 @@ class Store {
 			case 'seats_update':
 				this.applySeatsUpdate(ev as SeatsUpdate);
 				break;
+			case 'hand_sync':
+				this.applyHandSync(ev as HandSync);
+				break;
 		}
+	}
+
+	private applyHandSync(ev: HandSync) {
+		this.state.hand_id = ev.hand_id;
+		this.state.button_seat = ev.button_seat;
+		this.state.blinds = ev.blinds;
+		this.state.board = ev.board;
+		this.state.pot = ev.pot;
+		this.state.current_actor = ev.current_actor;
+		this.state.legal = ev.current_actor !== null
+			? { to_call: ev.to_call, min_raise: ev.min_raise, max_raise: ev.max_raise }
+			: null;
+		this.sittingOut = new Set(ev.seats.filter((s) => s.sitting_out).map((s) => s.seat));
+		this.state.seats = ev.seats.map<SeatState>((s, i) => {
+			const label = ev.hand_labels[s.seat] ?? ev.hand_labels[String(s.seat) as unknown as number];
+			return {
+				seat: s.seat,
+				bot_name: s.bot_name,
+				stack: ev.stacks[i],
+				bet: ev.bets[i],
+				folded: ev.folded[i],
+				hole_cards: s.hole_cards,
+				last_action: null,
+				hand_label: label ?? null,
+				sitting_out: !!s.sitting_out,
+				is_human: !!s.is_human
+			};
+		});
 	}
 
 	private applySnapshot(ev: Snapshot) {
@@ -84,6 +122,7 @@ class Store {
 		this.state.pot = 0;
 		this.state.current_actor = null;
 		this.sittingOut = new Set(ev.seats.filter((s) => s.sitting_out).map((s) => s.seat));
+		this.state.legal = null;
 		this.state.seats = ev.seats.map<SeatState>((s) => ({
 			seat: s.seat,
 			bot_name: s.bot_name,
@@ -93,7 +132,8 @@ class Store {
 			hole_cards: s.hole_cards,
 			last_action: null,
 			hand_label: null,
-			sitting_out: !!s.sitting_out
+			sitting_out: !!s.sitting_out,
+			is_human: !!s.is_human
 		}));
 	}
 
@@ -110,6 +150,8 @@ class Store {
 			this.state.seats[i].stack = ev.stacks[i];
 			this.state.seats[i].bet = ev.bets[i];
 		}
+		// Whoever just acted is no longer to act; the next actor_turn will repopulate.
+		this.state.legal = null;
 	}
 
 	private applyStreetDeal(ev: StreetDeal) {
@@ -163,6 +205,10 @@ class Store {
 
 	sitIn(seat: number) {
 		this.send({ cmd: 'sit_in', seat });
+	}
+
+	act(seat: number, kind: 'fold' | 'check_call' | 'raise_to', amount = 0) {
+		this.send({ cmd: 'act', seat, kind, amount });
 	}
 
 	connect(url: string) {

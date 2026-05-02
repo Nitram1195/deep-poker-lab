@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from backend.bots.base import Bot, HistoryEntry
-from backend.engine import HandEngine
+from backend.engine import HandEngine, hand_label
 from backend.events import (
     ActionEvent,
     ActorTurn,
     HandEnd,
     HandStart,
+    HandSync,
     LeaderboardEntry,
     LeaderboardUpdate,
     SeatInfo,
@@ -59,6 +61,14 @@ class GameRunner:
         self._can_play = asyncio.Event()
         self._can_play.set()
         self._task: asyncio.Task[None] | None = None
+        # Mid-hand state used to resync a client that connects mid-hand.
+        self._cur_engine: HandEngine | None = None
+        self._cur_seats_payload: list[SeatInfo] = []
+        self._cur_e2u: list[int] = []
+        self._cur_button_ui: int = 0
+        self._cur_human_seats: set[int] = set()
+        self._cur_actor_ui: int | None = None
+        self._cur_legal: tuple[int, int, int] | None = None
 
     @property
     def in_hand(self) -> bool:
@@ -77,6 +87,46 @@ class GameRunner:
             )
             for b in self._bots
         ]
+
+    def build_sync(self) -> HandSync | None:
+        """Snapshot of the current hand, or None if no hand is active."""
+        eng = self._cur_engine
+        if eng is None:
+            return None
+        n_total = len(self._bots)
+        n_active = eng.player_count
+        e2u = self._cur_e2u
+
+        def list_to_ui(values: list, default) -> list:
+            out = [default] * n_total
+            for e in range(n_active):
+                out[e2u[e]] = values[e]
+            return out
+
+        def dict_to_ui(d: dict) -> dict:
+            return {e2u[e]: v for e, v in d.items()}
+
+        labels = dict_to_ui(eng.hand_labels_by_seat())
+        if self._cur_human_seats:
+            labels = {u: lbl for u, lbl in labels.items() if u in self._cur_human_seats}
+
+        to_call, min_raise, max_raise = self._cur_legal or (0, 0, 0)
+        return HandSync(
+            hand_id=self._hand_id,
+            button_seat=self._cur_button_ui,
+            blinds=self._blinds,
+            seats=self._cur_seats_payload,
+            board=eng.board_cards(),
+            pot=eng.pot() + sum(eng.bets()),
+            stacks=list_to_ui(eng.stacks(), self._starting_stack),
+            bets=list_to_ui(eng.bets(), 0),
+            folded=list_to_ui(eng.folded(), False),
+            hand_labels=labels,
+            current_actor=self._cur_actor_ui,
+            to_call=to_call,
+            min_raise=min_raise,
+            max_raise=max_raise,
+        )
 
     async def set_sitting_out(self, ui_seat: int, sit_out: bool) -> None:
         if not (0 <= ui_seat < len(self._bots)):
@@ -138,12 +188,19 @@ class GameRunner:
         u2e = {u: e for e, u in enumerate(e2u)}
 
         bot_for_engine_seat = [self._bots[u] for u in e2u]
+        human_ui_seats = {u for u in range(n_total) if getattr(self._bots[u], "is_human", False)}
+        any_human = bool(human_ui_seats)
 
         engine = HandEngine(
             player_count=n_active,
             starting_stacks=[self._starting_stack] * n_active,
             blinds=self._blinds,
         )
+        # Cache hole cards now: pokerkit's HAND_KILLING automation may clear
+        # losers' cards at showdown, which would prevent us from revealing them.
+        hole_by_engine_seat: dict[int, list[str]] = {
+            i: list(engine.hole_cards(i)) for i in range(n_active)
+        }
         self._hand_id += 1
 
         # Inflate engine-indexed lists/dicts to UI-seat-indexed (size n_total),
@@ -161,7 +218,14 @@ class GameRunner:
         seats_payload: list[SeatInfo] = []
         for u in range(n_total):
             sitting_out = u in self._sitting_out
-            hole_cards = [] if sitting_out else list(engine.hole_cards(u2e[u]))
+            is_human = u in human_ui_seats
+            if sitting_out:
+                hole_cards = []
+            elif any_human and not is_human:
+                # Hide opponents' cards from the human; backs are rendered client-side.
+                hole_cards = []
+            else:
+                hole_cards = list(engine.hole_cards(u2e[u]))
             seats_payload.append(
                 SeatInfo(
                     seat=u,
@@ -169,8 +233,18 @@ class GameRunner:
                     starting_stack=self._starting_stack,
                     hole_cards=hole_cards,
                     sitting_out=sitting_out,
+                    is_human=is_human,
                 )
             )
+
+        # Stash everything resync-relevant before broadcasting hand_start.
+        self._cur_engine = engine
+        self._cur_seats_payload = seats_payload
+        self._cur_e2u = e2u
+        self._cur_button_ui = button_ui_seat
+        self._cur_human_seats = human_ui_seats
+        self._cur_actor_ui = None
+        self._cur_legal = None
 
         await self._broadcast(
             HandStart(
@@ -192,17 +266,22 @@ class GameRunner:
             cur_street = engine.street_index()
             if cur_street != last_street and cur_street > 0 and engine.board_cards():
                 street_name = ("flop", "turn", "river")[min(cur_street - 1, 2)]
+                labels_ui = dict_to_ui(engine.hand_labels_by_seat())
+                if any_human:
+                    labels_ui = {u: lbl for u, lbl in labels_ui.items() if u in human_ui_seats}
                 await self._broadcast(
                     StreetDeal(
                         street=street_name,
                         board=engine.board_cards(),
-                        hand_labels=dict_to_ui(engine.hand_labels_by_seat()),
+                        hand_labels=labels_ui,
                     )
                 )
                 await asyncio.sleep(STREET_DELAY_S)
             last_street = cur_street
 
             legal = engine.legal_actions()
+            self._cur_actor_ui = e2u[actor]
+            self._cur_legal = (legal.to_call, legal.min_raise, legal.max_raise)
             await self._broadcast(
                 ActorTurn(
                     seat=e2u[actor],
@@ -217,7 +296,8 @@ class GameRunner:
                 engine, actor, button_engine_seat, self._blinds, action_history=actions_this_hand
             )
             try:
-                action = bot_for_engine_seat[actor].act(obs)
+                result = bot_for_engine_seat[actor].act(obs)
+                action = await result if inspect.isawaitable(result) else result
             except Exception:
                 log.exception("bot %s crashed; folding for it", bot_for_engine_seat[actor].name)
                 from backend.events import Action
@@ -225,6 +305,8 @@ class GameRunner:
 
             street_at_action = engine.street_index()
             engine.apply(action)
+            self._cur_actor_ui = None
+            self._cur_legal = None
             actions_this_hand.append(
                 HistoryEntry(
                     street=street_names[min(street_at_action, 3)],
@@ -247,25 +329,74 @@ class GameRunner:
             )
             await asyncio.sleep(ACTION_DELAY_S)
 
-        folded = engine.folded()
-        revealed = {
-            e2u[i]: list(engine.hole_cards(i)) for i in range(n_active) if not folded[i]
-        }
-        if len(revealed) > 1:
-            await self._broadcast(Showdown(hole_cards=revealed))
+        # Determine who reached showdown using our own action history rather
+        # than engine.folded() — pokerkit's HAND_KILLING automation marks
+        # losing hands as inactive after showdown, which would hide losers'
+        # cards from the UI.
+        folded_engine_seats = {h.seat for h in actions_this_hand if h.kind == "fold"}
+        showdown_engine_seats = [
+            i for i in range(n_active) if i not in folded_engine_seats
+        ]
+        is_showdown = len(showdown_engine_seats) > 1
+
+        # Reveal cards before any auto-dealt streets so the user watches the
+        # runout knowing what hands are racing.
+        if is_showdown:
+            revealed_ui = {
+                e2u[i]: hole_by_engine_seat[i] for i in showdown_engine_seats
+            }
+            await self._broadcast(Showdown(hole_cards=revealed_ui))
+            await asyncio.sleep(STREET_DELAY_S)
+
+        # Catch up on streets that pokerkit auto-dealt during an all-in runout
+        # (RUNOUT_COUNT_SELECTION). Without this, the board jumps straight from
+        # whatever street the all-in happened on to the final state in HandEnd.
+        final_board = engine.board_cards()
+        final_street = {0: 0, 3: 1, 4: 2, 5: 3}.get(len(final_board), 0)
+        if is_showdown and final_street > last_street:
+            for street_idx in range(last_street + 1, final_street + 1):
+                street_name = ("flop", "turn", "river")[street_idx - 1]
+                board_size = (3, 4, 5)[street_idx - 1]
+                partial_board = final_board[:board_size]
+                labels_engine: dict[int, Any] = {}
+                for i in showdown_engine_seats:
+                    lbl = hand_label(tuple(hole_by_engine_seat[i]), partial_board)
+                    if lbl is not None:
+                        labels_engine[i] = lbl
+                await self._broadcast(
+                    StreetDeal(
+                        street=street_name,
+                        board=partial_board,
+                        hand_labels={e2u[i]: v for i, v in labels_engine.items()},
+                    )
+                )
+                await asyncio.sleep(STREET_DELAY_S)
 
         payoffs = engine.payoffs()
         for i, bot in enumerate(bot_for_engine_seat):
             self._lifetime_pnl[bot.name] += payoffs[i]
             self._hands_played[bot.name] += 1
 
+        # Final hand labels for showdown participants (compute against the cached
+        # hole cards in case pokerkit has mucked the loser's hand by now).
+        final_labels_ui: dict[int, Any] = {}
+        for i in showdown_engine_seats:
+            lbl = hand_label(tuple(hole_by_engine_seat[i]), final_board)
+            if lbl is not None:
+                final_labels_ui[e2u[i]] = lbl
+
         await self._broadcast(
             HandEnd(
                 hand_id=self._hand_id,
                 payoffs={e2u[i]: payoffs[i] for i in range(n_active)},
                 final_stacks=list_to_ui(engine.stacks(), self._starting_stack),
-                board=engine.board_cards(),
-                hand_labels=dict_to_ui(engine.hand_labels_by_seat()),
+                board=final_board,
+                hand_labels=final_labels_ui,
             )
         )
         await self._broadcast(LeaderboardUpdate(entries=self.leaderboard()))
+        # Hand done — drop the resync state so a connect during the inter-hand
+        # delay falls back to the next hand_start instead of replaying this one.
+        self._cur_engine = None
+        self._cur_actor_ui = None
+        self._cur_legal = None

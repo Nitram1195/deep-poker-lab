@@ -8,14 +8,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.bots.always_call import AlwaysCallBot
 from backend.bots.always_fold import AlwaysFoldBot
 from backend.bots.base import Bot
 from backend.bots.equity import EquityBot
+from backend.bots.human import HumanBot
 from backend.bots.llm import LLMBot
 from backend.bots.random_bot import RandomBot
 from backend.bots.tight_aggro import TightAggroRuleBot
-from backend.events import Snapshot
+from backend.events import Action, Snapshot
 from backend.runner import GameRunner
 from backend.ws import ConnectionManager
 
@@ -26,7 +26,7 @@ log = logging.getLogger("backend")
 def _build_runner(broadcast) -> GameRunner:
     bots: list[Bot] = [
         RandomBot(seed=42),
-        AlwaysCallBot(),
+        HumanBot(),
         AlwaysFoldBot(),
         TightAggroRuleBot(),
         EquityBot(n_simulations=120, seed=7),
@@ -96,12 +96,28 @@ async def ws_endpoint(ws: WebSocket) -> None:
             sitting_out=runner.sitting_out,
         )
         await cm.send(ws, snapshot)
+        sync = runner.build_sync()
+        if sync is not None:
+            await cm.send(ws, sync)
         while True:
             data = await ws.receive_json()
             cmd = data.get("cmd") if isinstance(data, dict) else None
             seat = data.get("seat") if isinstance(data, dict) else None
             if cmd in ("sit_out", "sit_in") and isinstance(seat, int):
                 await runner.set_sitting_out(seat, cmd == "sit_out")
+            elif cmd == "act" and isinstance(seat, int):
+                bot = runner._bots[seat] if 0 <= seat < len(runner._bots) else None
+                if bot is None or not getattr(bot, "is_human", False):
+                    log.warning("ws: act for non-human seat %r", seat)
+                    continue
+                kind = data.get("kind")
+                amount = data.get("amount", 0)
+                if kind not in ("fold", "check_call", "raise_to") or not isinstance(amount, int):
+                    log.warning("ws: bad act payload %r", data)
+                    continue
+                accepted = bot.submit(Action(kind=kind, amount=amount))
+                if not accepted:
+                    log.info("ws: act dropped (not the human's turn) %r", data)
             else:
                 log.warning("ws: ignoring unknown command %r", data)
     except WebSocketDisconnect:

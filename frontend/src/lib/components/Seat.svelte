@@ -1,21 +1,60 @@
 <script lang="ts">
-	import type { SeatState } from '$lib/types';
+	import type { LegalActions, SeatState } from '$lib/types';
 	import Card from './Card.svelte';
 	import { store } from '$lib/store.svelte';
 
 	let {
 		seat,
 		isButton,
-		isActor
-	}: { seat: SeatState; isButton: boolean; isActor: boolean } = $props();
+		isActor,
+		legal
+	}: {
+		seat: SeatState;
+		isButton: boolean;
+		isActor: boolean;
+		legal: LegalActions | null;
+	} = $props();
 
+	const showActions = $derived(seat.is_human && isActor && legal !== null);
+	const callLabel = $derived.by(() => {
+		if (!legal) return 'check';
+		return legal.to_call > 0 ? `call ${legal.to_call}` : 'check';
+	});
+	const canRaise = $derived(legal !== null && legal.max_raise > 0 && legal.min_raise > 0);
+
+	let raiseAmount = $state(0);
+	$effect(() => {
+		// Reset the raise input each time it's the human's turn.
+		if (showActions && legal) {
+			raiseAmount = legal.min_raise;
+		}
+	});
+
+	function clamp(n: number) {
+		if (!legal) return n;
+		return Math.max(legal.min_raise, Math.min(legal.max_raise, Math.floor(n)));
+	}
+
+	function doFold() {
+		store.act(seat.seat, 'fold');
+	}
+	function doCheckCall() {
+		store.act(seat.seat, 'check_call');
+	}
+	function doRaise() {
+		if (!legal) return;
+		store.act(seat.seat, 'raise_to', clamp(raiseAmount));
+	}
+
+	const isAllIn = $derived(!seat.sitting_out && !seat.folded && seat.stack === 0);
 	const actionLabel = $derived(formatAction(seat.last_action));
 
 	function formatAction(a: SeatState['last_action']) {
 		if (!a) return '';
 		if (a.kind === 'fold') return 'fold';
-		if (a.kind === 'check_call') return seat.bet > 0 ? `call ${seat.bet}` : 'check';
-		return `raise to ${a.amount}`;
+		const allInSuffix = isAllIn ? ' (all-in)' : '';
+		if (a.kind === 'check_call') return (seat.bet > 0 ? `call ${seat.bet}` : 'check') + allInSuffix;
+		return `raise to ${a.amount}` + allInSuffix;
 	}
 
 	let menuOpen = $state(false);
@@ -85,6 +124,9 @@
 				<Card card={null} /><Card card={null} />
 			{/if}
 		</div>
+		{#if isAllIn}
+			<div class="allin-badge">ALL-IN</div>
+		{/if}
 		{#if seat.hand_label && !seat.folded}
 			<div class="hand-label" data-rank={seat.hand_label.category}>{seat.hand_label.text}</div>
 		{/if}
@@ -93,6 +135,29 @@
 			{#if seat.bet > 0}<span class="bet"><span class="info-label">bet</span> {seat.bet}</span>{/if}
 		</div>
 		<div class="last-action">{actionLabel}</div>
+		{#if showActions && legal}
+			<div class="actions" onclick={(e) => e.stopPropagation()}>
+				<div class="action-row">
+					<button class="btn fold" onclick={doFold}>Fold</button>
+					<button class="btn call" onclick={doCheckCall}>{callLabel}</button>
+				</div>
+				{#if canRaise}
+					<div class="action-row raise-row">
+						<input
+							type="number"
+							min={legal.min_raise}
+							max={legal.max_raise}
+							step="1"
+							bind:value={raiseAmount}
+						/>
+						<button class="btn raise" onclick={doRaise}>
+							Raise to {clamp(raiseAmount)}
+						</button>
+					</div>
+					<div class="raise-hint">min {legal.min_raise} · max {legal.max_raise}</div>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -209,6 +274,23 @@
 		border: 1px dashed rgba(168, 85, 247, 0.5);
 		border-radius: 4px;
 	}
+	.allin-badge {
+		align-self: flex-start;
+		padding: 3px 10px;
+		font-size: 0.74em;
+		font-weight: 800;
+		letter-spacing: 0.18em;
+		color: #ffffff;
+		background: linear-gradient(135deg, #ef4444, #b91c1c);
+		border: 1px solid rgba(254, 202, 202, 0.6);
+		border-radius: 4px;
+		box-shadow: 0 0 14px rgba(239, 68, 68, 0.55);
+		animation: allin-glow 1.6s ease-in-out infinite;
+	}
+	@keyframes allin-glow {
+		0%, 100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.45); }
+		50%      { box-shadow: 0 0 22px rgba(239, 68, 68, 0.85); }
+	}
 	.cards {
 		display: flex;
 		gap: 0;
@@ -268,6 +350,73 @@
 	.hand-label[data-rank='Straight flush']    {
 		background: linear-gradient(135deg, #d946ef, #6d28d9); color: white; border-color: #f5d0fe;
 		box-shadow: 0 0 16px rgba(217, 70, 239, 0.7);
+	}
+
+	.actions {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin-top: 4px;
+		padding-top: 8px;
+		border-top: 1px solid rgba(168, 85, 247, 0.2);
+	}
+	.action-row {
+		display: flex;
+		gap: 6px;
+	}
+	.btn {
+		flex: 1;
+		padding: 6px 10px;
+		font: inherit;
+		font-size: 0.85em;
+		font-weight: 600;
+		color: var(--ink-0);
+		background: linear-gradient(160deg, rgba(109, 40, 217, 0.6), rgba(45, 27, 78, 0.6));
+		border: 1px solid rgba(168, 85, 247, 0.5);
+		border-radius: 6px;
+		cursor: pointer;
+		transition: background 0.1s, transform 0.05s;
+	}
+	.btn:hover {
+		background: linear-gradient(160deg, rgba(168, 85, 247, 0.7), rgba(109, 40, 217, 0.7));
+	}
+	.btn:active {
+		transform: scale(0.98);
+	}
+	.btn.fold {
+		background: linear-gradient(160deg, rgba(127, 29, 29, 0.5), rgba(45, 27, 78, 0.6));
+		border-color: rgba(248, 113, 113, 0.45);
+	}
+	.btn.fold:hover {
+		background: linear-gradient(160deg, rgba(220, 38, 38, 0.6), rgba(127, 29, 29, 0.6));
+	}
+	.btn.raise {
+		background: linear-gradient(160deg, rgba(217, 70, 239, 0.6), rgba(109, 40, 217, 0.6));
+		border-color: rgba(217, 70, 239, 0.55);
+	}
+	.btn.raise:hover {
+		background: linear-gradient(160deg, rgba(217, 70, 239, 0.8), rgba(168, 85, 247, 0.7));
+	}
+	.raise-row input {
+		width: 70px;
+		padding: 6px 8px;
+		font: inherit;
+		font-size: 0.85em;
+		color: var(--ink-0);
+		background: rgba(0, 0, 0, 0.35);
+		border: 1px solid rgba(168, 85, 247, 0.3);
+		border-radius: 6px;
+		font-variant-numeric: tabular-nums;
+	}
+	.raise-row input:focus {
+		outline: none;
+		border-color: var(--purple-3);
+	}
+	.raise-hint {
+		font-size: 0.7em;
+		color: var(--ink-2);
+		text-align: right;
+		font-variant-numeric: tabular-nums;
 	}
 
 	/* Right-click context menu */

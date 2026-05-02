@@ -13,6 +13,7 @@ export interface SeatInfo {
 	starting_stack: number;
 	hole_cards: string[];
 	sitting_out?: boolean;
+	is_human?: boolean;
 }
 
 export interface HandLabel {
@@ -92,6 +93,24 @@ export interface Snapshot {
 	sitting_out?: number[];
 }
 
+export interface HandSync {
+	type: 'hand_sync';
+	hand_id: number;
+	button_seat: number;
+	blinds: [number, number];
+	seats: SeatInfo[];
+	board: string[];
+	pot: number;
+	stacks: number[];
+	bets: number[];
+	folded: boolean[];
+	hand_labels: Record<number, HandLabel>;
+	current_actor: number | null;
+	to_call: number;
+	min_raise: number;
+	max_raise: number;
+}
+
 export type ServerEvent =
 	| HandStart
 	| ActorTurn
@@ -101,7 +120,8 @@ export type ServerEvent =
 	| HandEnd
 	| LeaderboardUpdate
 	| SeatsUpdate
-	| Snapshot;
+	| Snapshot
+	| HandSync;
 
 // --- UI state derived from event stream ---
 
@@ -115,6 +135,13 @@ export interface SeatState {
 	last_action: Action | null;
 	hand_label: HandLabel | null; // null preflop or folded
 	sitting_out: boolean;
+	is_human: boolean;
+}
+
+export interface LegalActions {
+	to_call: number;
+	min_raise: number;
+	max_raise: number;
 }
 
 export interface TableState {
@@ -126,6 +153,7 @@ export interface TableState {
 	board: string[];
 	pot: number;
 	current_actor: number | null;
+	legal: LegalActions | null;
 	leaderboard: LeaderboardEntry[];
 	last_event: string;
 }

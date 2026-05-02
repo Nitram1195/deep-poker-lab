@@ -21,6 +21,7 @@ class SeatInfo(BaseModel):
     starting_stack: int
     hole_cards: list[str]
     sitting_out: bool = False
+    is_human: bool = False
 
 
 class HandLabel(BaseModel):
@@ -95,6 +96,25 @@ class Snapshot(BaseModel):
     sitting_out: list[int] = []
 
 
+class HandSync(BaseModel):
+    """Full mid-hand state, sent to a client that connects/reconnects mid-hand."""
+    type: Literal["hand_sync"] = "hand_sync"
+    hand_id: int
+    button_seat: int
+    blinds: tuple[int, int]
+    seats: list[SeatInfo]
+    board: list[str]
+    pot: int
+    stacks: list[int]
+    bets: list[int]
+    folded: list[bool]
+    hand_labels: dict[int, HandLabel]
+    current_actor: int | None = None
+    to_call: int = 0
+    min_raise: int = 0
+    max_raise: int = 0
+
+
 Event = Union[
     HandStart,
     ActorTurn,
@@ -105,4 +125,5 @@ Event = Union[
     LeaderboardUpdate,
     SeatsUpdate,
     Snapshot,
+    HandSync,
 ]

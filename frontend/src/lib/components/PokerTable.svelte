@@ -32,6 +32,7 @@
 					seat={s}
 					isButton={state.button_seat === s.seat}
 					isActor={state.current_actor === s.seat}
+					legal={state.current_actor === s.seat ? state.legal : null}
 				/>
 			</div>
 		{/each}
