@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.bots.always_fold import AlwaysFoldBot
 from backend.bots.base import Bot
 from backend.bots.equity import EquityBot
+from backend.bots.gto import GTOBot
 from backend.bots.human import HumanBot
 from backend.bots.llm import LLMBot
 from backend.bots.random_bot import RandomBot
@@ -27,9 +27,9 @@ def _build_runner(broadcast) -> GameRunner:
     bots: list[Bot] = [
         RandomBot(seed=42),
         HumanBot(),
-        AlwaysFoldBot(),
         TightAggroRuleBot(),
         EquityBot(n_simulations=120, seed=7),
+        GTOBot(seed=11),
     ]
 
     groq_key = os.environ.get("GROQ_API_KEY")
