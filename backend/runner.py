@@ -46,6 +46,7 @@ class GameRunner:
         broadcast: Broadcast,
         starting_stack: int = 200,
         blinds: tuple[int, int] = (1, 2),
+        delay_scale: float = 1.0,
     ):
         if len(bots) < 2:
             raise ValueError("need at least 2 bots")
@@ -53,9 +54,13 @@ class GameRunner:
         self._broadcast = broadcast
         self._starting_stack = starting_stack
         self._blinds = blinds
+        # Multiplied into every visual sleep. Set to 0.0 for benchmark mode.
+        self._delay_scale = delay_scale
         self._hand_id = 0
         self._lifetime_pnl: dict[str, int] = {b.name: 0 for b in bots}
         self._hands_played: dict[str, int] = {b.name: 0 for b in bots}
+        self._vpip_count: dict[str, int] = {b.name: 0 for b in bots}
+        self._pfr_count: dict[str, int] = {b.name: 0 for b in bots}
         # UI-seat indices currently sitting out. A toggle takes effect from the
         # next hand; the in-progress hand always finishes first.
         self._sitting_out: set[int] = set()
@@ -92,6 +97,8 @@ class GameRunner:
                 bot_name=b.name,
                 hands_played=self._hands_played[b.name],
                 net_chips=self._lifetime_pnl[b.name],
+                vpip=self._vpip_count[b.name],
+                pfr=self._pfr_count[b.name],
             )
             for b in self._bots
         ]
@@ -178,12 +185,17 @@ class GameRunner:
             except asyncio.CancelledError:
                 pass
 
+    async def play_hands(self, n: int) -> None:
+        """Play exactly n hands, then return. Used by benchmark mode."""
+        for _ in range(n):
+            await self._play_one_hand()
+
     async def _run_forever(self) -> None:
         try:
             while True:
                 await self._can_play.wait()
                 await self._play_one_hand()
-                await asyncio.sleep(HAND_END_DELAY_S)
+                await asyncio.sleep(HAND_END_DELAY_S * self._delay_scale)
         except asyncio.CancelledError:
             log.info("game runner cancelled")
             raise
@@ -294,6 +306,8 @@ class GameRunner:
         last_street = -1
         actions_this_hand: list[HistoryEntry] = []
         street_names = ("preflop", "flop", "turn", "river")
+        vpip_engine_seats: set[int] = set()
+        pfr_engine_seats: set[int] = set()
         while not engine.is_complete():
             actor = engine.current_actor()
             if actor is None:
@@ -320,7 +334,7 @@ class GameRunner:
                         hand_labels=labels_live,
                     ),
                 )
-                await asyncio.sleep(STREET_DELAY_S)
+                await asyncio.sleep(STREET_DELAY_S * self._delay_scale)
             last_street = cur_street
 
             legal = engine.legal_actions()
@@ -334,7 +348,7 @@ class GameRunner:
                     max_raise=legal.max_raise,
                 )
             )
-            await asyncio.sleep(TURN_DELAY_S)
+            await asyncio.sleep(TURN_DELAY_S * self._delay_scale)
 
             obs = build_observation(
                 engine, actor, button_engine_seat, self._blinds, action_history=actions_this_hand
@@ -348,6 +362,12 @@ class GameRunner:
                 action = Action(kind="check_call") if legal.can_check_call else Action(kind="fold")
 
             street_at_action = engine.street_index()
+            if street_at_action == 0:
+                if action.kind == "raise_to":
+                    vpip_engine_seats.add(actor)
+                    pfr_engine_seats.add(actor)
+                elif action.kind == "check_call" and legal.to_call > 0:
+                    vpip_engine_seats.add(actor)
             engine.apply(action)
             self._cur_actor_ui = None
             self._cur_legal = None
@@ -371,7 +391,7 @@ class GameRunner:
                     bets=list_to_ui(engine.bets(), 0),
                 )
             )
-            await asyncio.sleep(ACTION_DELAY_S)
+            await asyncio.sleep(ACTION_DELAY_S * self._delay_scale)
 
         # Determine who reached showdown using our own action history rather
         # than engine.folded() — pokerkit's HAND_KILLING automation marks
@@ -390,7 +410,7 @@ class GameRunner:
                 e2u[i]: hole_by_engine_seat[i] for i in showdown_engine_seats
             }
             await self._emit(Showdown(hole_cards=revealed_ui))
-            await asyncio.sleep(STREET_DELAY_S)
+            await asyncio.sleep(STREET_DELAY_S * self._delay_scale)
 
         # Catch up on streets that pokerkit auto-dealt during an all-in runout
         # (RUNOUT_COUNT_SELECTION). Without this, the board jumps straight from
@@ -414,12 +434,16 @@ class GameRunner:
                         hand_labels={e2u[i]: v for i, v in labels_engine.items()},
                     )
                 )
-                await asyncio.sleep(STREET_DELAY_S)
+                await asyncio.sleep(STREET_DELAY_S * self._delay_scale)
 
         payoffs = engine.payoffs()
         for i, bot in enumerate(bot_for_engine_seat):
             self._lifetime_pnl[bot.name] += payoffs[i]
             self._hands_played[bot.name] += 1
+            if i in vpip_engine_seats:
+                self._vpip_count[bot.name] += 1
+            if i in pfr_engine_seats:
+                self._pfr_count[bot.name] += 1
 
         # Final hand labels for showdown participants (compute against the cached
         # hole cards in case pokerkit has mucked the loser's hand by now).

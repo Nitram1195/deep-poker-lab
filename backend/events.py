@@ -72,6 +72,11 @@ class LeaderboardEntry(BaseModel):
     bot_name: str
     hands_played: int
     net_chips: int
+    # Counts (not percentages). Benchmark and any UI consumer divide by hands_played.
+    # VPIP = hands where the bot voluntarily put money in preflop (BB walks don't count).
+    # PFR  = hands where the bot raised preflop.
+    vpip: int = 0
+    pfr: int = 0
 
 
 class LeaderboardUpdate(BaseModel):
